@@ -1,5 +1,4 @@
 # encoding: utf-8 
-require "weibo_2"
 
 module Agents
   class WeiboUserAgent < Agent
@@ -8,7 +7,9 @@ module Agents
     cannot_receive_events!
 
     description <<-MD
-      The WeiboUserAgent follows the timeline of a specified Weibo user. It uses this endpoint: http://open.weibo.com/wiki/2/statuses/user_timeline/en
+      The Weibo User Agent follows the timeline of a specified Weibo user. It uses this endpoint: http://open.weibo.com/wiki/2/statuses/user_timeline/en
+
+      #{'## Include `weibo_2` in your Gemfile to use this Agent!' if dependencies_missing?}
 
       You must first set up a Weibo app and generate an `acess_token` to authenticate with. Provide that, along with the `app_key` and `app_secret` for your Weibo app in the options.
 
@@ -71,13 +72,13 @@ module Agents
 
     def validate_options
       unless options['uid'].present? &&
-        options['expected_update_period_in_days'].present?
+             options['expected_update_period_in_days'].present?
         errors.add(:base, "expected_update_period_in_days and uid are required")
       end
     end
 
     def working?
-      event_created_within?(options['expected_update_period_in_days']) && !recent_error_logs?
+      event_created_within?(interpolated['expected_update_period_in_days']) && !recent_error_logs?
     end
 
     def default_options
@@ -92,7 +93,7 @@ module Agents
 
     def check
       since_id = memory['since_id'] || nil
-      opts = {:uid => options['uid'].to_i}
+      opts = {:uid => interpolated['uid'].to_i}
       opts.merge! :since_id => since_id unless since_id.nil?
 
       # http://open.weibo.com/wiki/2/statuses/user_timeline/en

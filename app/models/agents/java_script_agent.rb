@@ -3,17 +3,21 @@ require 'cgi'
 
 module Agents
   class JavaScriptAgent < Agent
+    include FormConfigurable
+
+    can_dry_run!
+
     default_schedule "never"
 
     description <<-MD
-      This Agent allows you to write code in JavaScript that can create and receive events.  If other Agents aren't meeting your needs, try this one!
+      The JavaScript Agent allows you to write code in JavaScript that can create and receive events.  If other Agents aren't meeting your needs, try this one!
 
       You can put code in the `code` option, or put your code in a Credential and reference it from `code` with `credential:<name>` (recommended).
 
       You can implement `Agent.check` and `Agent.receive` as you see fit.  The following methods will be available on Agent in the JavaScript environment:
 
       * `this.createEvent(payload)`
-      * `this.incomingEvents()`
+      * `this.incomingEvents()` (the returned event objects will each have a `payload` property)
       * `this.memory()`
       * `this.memory(key)`
       * `this.memory(keyToSet, valueToSet)`
@@ -21,7 +25,14 @@ module Agents
       * `this.options(key)`
       * `this.log(message)`
       * `this.error(message)`
+      * `this.escapeHtml(htmlToEscape)`
+      * `this.unescapeHtml(htmlToUnescape)`
     MD
+
+    form_configurable :language, type: :array, values: %w[JavaScript CoffeeScript]
+    form_configurable :code, type: :text, ace: true
+    form_configurable :expected_receive_period_in_days
+    form_configurable :expected_update_period_in_days
 
     def validate_options
       cred_name = credential_referenced_by_code
@@ -30,17 +41,21 @@ module Agents
       else
         errors.add(:base, "The 'code' option is required") unless options['code'].present?
       end
+
+      if interpolated['language'].present? && !interpolated['language'].downcase.in?(%w[javascript coffeescript])
+        errors.add(:base, "The 'language' must be JavaScript or CoffeeScript")
+      end
     end
 
     def working?
       return false if recent_error_logs?
 
-      if options['expected_update_period_in_days'].present?
-        return false unless event_created_within?(options['expected_update_period_in_days'])
+      if interpolated['expected_update_period_in_days'].present?
+        return false unless event_created_within?(interpolated['expected_update_period_in_days'])
       end
 
-      if options['expected_receive_period_in_days'].present?
-        return false unless last_receive_at && last_receive_at > options['expected_receive_period_in_days'].to_i.days.ago
+      if interpolated['expected_receive_period_in_days'].present?
+        return false unless last_receive_at && last_receive_at > interpolated['expected_receive_period_in_days'].to_i.days.ago
       end
 
       true
@@ -67,7 +82,7 @@ module Agents
             this.memory('callCount', callCount + 1);
           }
         };
-        
+
         Agent.receive = function() {
           var events = this.incomingEvents();
           for(var i = 0; i < events.length; i++) {
@@ -77,9 +92,10 @@ module Agents
       JS
 
       {
-        "code" => js_code.gsub(/[\n\r\t]/, '').strip,
-        'expected_receive_period_in_days' => "2",
-        'expected_update_period_in_days' => "2"
+        'code' => Utils.unindent(js_code),
+        'language' => 'JavaScript',
+        'expected_receive_period_in_days' => '2',
+        'expected_update_period_in_days' => '2'
       }
     end
 
@@ -92,7 +108,7 @@ module Agents
 
       context["doCreateEvent"] = lambda { |a, y| create_event(payload: clean_nans(JSON.parse(y))).payload.to_json }
       context["getIncomingEvents"] = lambda { |a| incoming_events.to_json }
-      context["getOptions"] = lambda { |a, x| options.to_json }
+      context["getOptions"] = lambda { |a, x| interpolated.to_json }
       context["doLog"] = lambda { |a, x| log x }
       context["doError"] = lambda { |a, x| error x }
       context["getMemory"] = lambda do |a, x, y|
@@ -102,8 +118,14 @@ module Agents
           memory.to_json
         end
       end
+      context["escapeHtml"] = lambda { |a, x| CGI.escapeHTML(x) }
+      context["unescapeHtml"] = lambda { |a, x| CGI.unescapeHTML(x) }
 
-      context.eval(code)
+      if (options['language'] || '').downcase == 'coffeescript'
+        context.eval(CoffeeScript.compile code)
+      else
+        context.eval(code)
+      end
       context.eval("Agent.#{js_function}();")
     end
 
@@ -112,12 +134,12 @@ module Agents
       if cred
         credential(cred) || 'Agent.check = function() { this.error("Unable to find credential"); };'
       else
-        options['code']
+        interpolated['code']
       end
     end
 
     def credential_referenced_by_code
-      options['code'] =~ /\Acredential:(.*)\Z/ && $1
+      (interpolated['code'] || '').strip =~ /\Acredential:(.*)\Z/ && $1
     end
 
     def setup_javascript
@@ -156,6 +178,14 @@ module Agents
 
         Agent.error = function(message) {
           doError(message);
+        }
+
+        Agent.escapeHtml = function(html) {
+          return escapeHtml(html);
+        }
+
+        Agent.unescapeHtml = function(html) {
+          return unescapeHtml(html);
         }
 
         Agent.check = function(){};

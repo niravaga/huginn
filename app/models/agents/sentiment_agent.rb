@@ -7,10 +7,9 @@ module Agents
     cannot_be_scheduled!
 
     description <<-MD
-      The SentimentAgent generates `good-bad` (psychological valence or happiness index), `active-passive` (arousal),
-      and  `strong-weak` (dominance) score. It will output a value between 1 and 9. It will only work on English content.
+      The Sentiment Agent generates `good-bad` (psychological valence or happiness index), `active-passive` (arousal), and  `strong-weak` (dominance) score. It will output a value between 1 and 9. It will only work on English content.
 
-      Make sure the content this agent is analyzing have sufficient length to get respectable results.
+      Make sure the content this agent is analyzing is of sufficient length to get respectable results.
 
       Provide a JSONPath in `content` field where content is residing and set `expected_receive_period_in_days` to the maximum number of days you would allow to be passed between events being received by this agent.
     MD
@@ -34,13 +33,13 @@ module Agents
     end
 
     def working?
-      last_receive_at && last_receive_at > options['expected_receive_period_in_days'].to_i.days.ago && !recent_error_logs?
+      last_receive_at && last_receive_at > interpolated['expected_receive_period_in_days'].to_i.days.ago && !recent_error_logs?
     end
 
     def receive(incoming_events)
       anew = self.class.sentiment_hash
       incoming_events.each do |event|
-        Utils.values_at(event.payload, options['content']).each do |content|
+        Utils.values_at(event.payload, interpolated['content']).each do |content|
           sent_values = sentiment_values anew, content
           create_event :payload => { 'content' => content,
                                      'valence' => sent_values[0],
